@@ -1,0 +1,121 @@
+defaults:
+  - _self_
+  - task: libero10_spatial
+
+name: train_flow_match_unet_libero
+_target_: diffusion_policy.workspace.train_flow_match_unet_image_workspace.TrainFlowMatchUnetImageWorkspace
+
+task_name: ${task.name}
+shape_meta: ${task.shape_meta}
+upstream_commit: b243804
+flow_time_convention: pi05_t1_noise_t0_action
+
+horizon: 32
+n_obs_steps: 2
+n_action_steps: 10
+
+policy:
+  _target_: diffusion_policy.policy.flow_match_unet_image_policy.FlowMatchUnetImagePolicy
+  shape_meta: ${shape_meta}
+  obs_encoder:
+    _target_: diffusion_policy.model.vision.multi_image_obs_encoder.MultiImageObsEncoder
+    shape_meta: ${shape_meta}
+    rgb_model:
+      _target_: diffusion_policy.model.vision.model_getter.get_resnet
+      name: resnet18
+      weights: null
+    resize_shape: null
+    crop_shape: [112, 112]
+    random_crop: true
+    use_group_norm: true
+    share_rgb_model: false
+    imagenet_norm: true
+  horizon: ${horizon}
+  n_action_steps: ${n_action_steps}
+  n_obs_steps: ${n_obs_steps}
+  num_tasks: ${task.num_tasks}
+  proprio_representation: ${task.proprio_representation}
+  task_embedding_dim: 32
+  num_inference_steps: 10
+  diffusion_step_embed_dim: 128
+  down_dims: [128, 256]
+  kernel_size: 5
+  n_groups: 8
+  cond_predict_scale: true
+  flow_time_convention: ${flow_time_convention}
+  agentview_dropout: 0.5
+
+ema:
+  _target_: diffusion_policy.model.diffusion.ema_model.EMAModel
+  update_after_step: 0
+  inv_gamma: 1.0
+  power: 0.75
+  min_value: 0.0
+  max_value: 0.9999
+
+dataloader:
+  batch_size: 64
+  num_workers: 4
+  shuffle: true
+  pin_memory: true
+  persistent_workers: true
+
+val_dataloader:
+  batch_size: 64
+  num_workers: 4
+  shuffle: false
+  pin_memory: true
+  persistent_workers: false
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 1.0e-4
+  betas: [0.95, 0.999]
+  eps: 1.0e-8
+  weight_decay: 1.0e-6
+
+training:
+  device: cuda:0
+  seed: 20261104
+  debug: false
+  resume: true
+  lr_scheduler: cosine
+  lr_warmup_steps: 500
+  num_epochs: 301
+  gradient_accumulate_every: 1
+  use_ema: true
+  freeze_encoder: false
+  rollout_every: 25
+  checkpoint_every: 25
+  val_every: 25
+  sample_every: 5
+  max_train_steps: null
+  max_val_steps: 32
+  tqdm_interval_sec: 1.0
+
+logging:
+  project: dp-fm-libero
+  resume: true
+  mode: offline
+  name: ${now:%Y.%m.%d-%H.%M.%S}_${name}
+  tags: [dpfm, libero, task]
+  id: null
+  group: null
+
+checkpoint:
+  topk:
+    monitor_key: rollout_success_rate
+    mode: max
+    k: 1
+    format_str: epoch={epoch:04d}-rollout_success_rate={rollout_success_rate:.4f}.ckpt
+  save_last_ckpt: false
+  save_last_snapshot: false
+
+hydra:
+  job:
+    override_dirname: ${name}
+  run:
+    dir: outputs/logs/${now:%Y%m%d_%H%M%S}
+  sweep:
+    dir: outputs/logs/${now:%Y%m%d_%H%M%S}
+    subdir: ${hydra.job.num}
